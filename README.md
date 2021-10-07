@@ -51,7 +51,7 @@ Install dependencies:
     pip install IPython keras matplotlib numpy pandas sklearn tensorflow ds4n6-lib
 ```
 
-Download ml.py file from github and import in your python3 program or Jupyter Notebook as "ml".
+Download [ml.py](https://github.com/ds4n6/D4ML/raw/main/ml.py) file from github and import in your python3 program or Jupyter Notebook as "ml".
 
 ```python
     import ml
