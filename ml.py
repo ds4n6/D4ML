@@ -35,100 +35,50 @@ from sklearn.model_selection import train_test_split
 from sklearn.preprocessing   import LabelEncoder, OneHotEncoder, MinMaxScaler, StandardScaler
 
 # tensorflow-keras (for GPU use)
+# BUG FIX: Requires modifying the keras/backend/tensorflow_backend.py file:
+# From:
+#       return isinstance(x, tf_ops._TensorLike) or tf_ops.is_dense_tensor_like(x)
+# To:
+#       return isinstance(x, tf_ops.core_tf_types.Tensor) or tf_ops.is_dense_tensor_like(x)
+#
 from tensorflow.keras.models            import Model, Sequential, load_model
 from tensorflow.keras.layers            import Input, Dense, LSTM, TimeDistributed, RepeatVector
 from tensorflow.keras.callbacks         import History 
 
+# vanilla keras
+# from keras.models            import Model, Sequential, load_model
+# from keras.layers            import Input, Dense, LSTM, TimeDistributed, RepeatVector
+# from keras.callbacks         import History 
+
 # DS4N6 IMPORTS ---------------------------------------------------------------
 import ds4n6_lib.d4     as d4
+import ds4n6_lib.common as d4com
+import ds4n6_lib.utils  as d4utl
+import ds4n6_lib.evtx  as d4evtx
+
 
 ###############################################################################
 # FUNCTIONS
 ###############################################################################
 
-def convert_evtx_ham_to_hml(evtx_ham_df):
-    if evtx_ham_df['D4_DataType_'][0]!='evtx':
-        return None
-    
-    hml_df = evtx_ham_df[['EventID_', 'Computer', '@Name', 'TaskName',  '@UserID', 'UserName', 'UserContext', 'ResultCode', 'ActionName']]
-    hml_df.reset_index(inplace=True)
-    # Rename Columns
-    hml_df = hml_df.rename(columns={"Timestamp":   'Timestamp_'})
-    hml_df = hml_df.rename(columns={'Computer':    'Computer_'})
-    hml_df = hml_df.rename(columns={'@Name':       'AtName_'})
-    hml_df = hml_df.rename(columns={'TaskName':    'TaskName_'})
-    hml_df = hml_df.rename(columns={'UserName':    'UserName_'})
-    hml_df = hml_df.rename(columns={'UserContext': 'UserContext_'})
-    hml_df = hml_df.rename(columns={'@UserID':     'AtUserID_'})
-    hml_df = hml_df.rename(columns={'ActionName':  'ActionName_'})
-    hml_df = hml_df.rename(columns={'ResultCode':  'ResultCode_'})
 
-    # Computer_ -----------------------------------------------------------------------------------
-    hml_df['Computer_'] = hml_df['Computer_'].str.lower()
-
-    # UserName / UserContext ----------------------------------------------------------------------
-    hml_df['UserName_']    = hml_df['UserName_'].str.lower()
-    hml_df['UserContext_'] = hml_df['UserContext_'].str.lower()
-
-    # Combine UserName + UserContext Cols
-    hml_df['UserNC_'] = hml_df['UserName_']
-    hml_df['UserNC_'] = hml_df['UserNC_'].fillna(hml_df['UserContext_'])
-    hml_df = hml_df.drop(columns=['UserName_', 'UserContext_'])
-
-    # Add Domain d4_null to entries with no domain
-    hml_df['UserNC_'] = hml_df['UserNC_'].str.replace('^([^\\\\]*)$', 'd4_null\\\\\\1')
-
-    # Fill NaNs with default values
-    hml_df['UserNC_']       = hml_df['UserNC_'].fillna('d4_null')
-
-    # Hostname_ -----------------------------------------------------------------------------------
-    # This column is needed to merge tskevtx + tskflist. We will drop it when running the model 
-    hml_df['Hostname_'] = hml_df['Computer_'].str.replace('\..*','')
-    hml_df = hml_df.drop(columns=['Computer_'])
-    # Fill NaNs with default values ================================================================
-    hml_df['ResultCode_']   = hml_df['ResultCode_'].fillna("-64646464")
-    hml_df['ActionName_']   = hml_df['ActionName_'].fillna('d4_null')
-
-    hml_df['D4_DataType_'] = 'evtx-hml'
-
-    hml_df = hml_df.reset_index(drop=True)
-    return hml_df
-
-
-def convert_flist_ham_to_hml(flist_ham_df):
-    if flist_ham_df['D4_DataType_'][0]!='flist':
-        return None
-    
-    hml_df = flist_ham_df[['D4_Hostname_', 'Permissions_', 'Deleted_', 'Tag_', 'FilePath_', 'TSNTFSAttr_']]
-    # FEATURE ENGINEERING #################################################################################################
-    # Rename Columns
-    hml_df = hml_df.rename(columns={'D4_Hostname_': 'Computer_'})
-
-    hml_df['FileName_'] = hml_df['FilePath_'].str.replace('.*/','')
-    hml_df = hml_df.drop(columns=['FilePath_',])
-    # Computer_ ----------------------------------------------------------------------
-    hml_df['Computer_']       = hml_df['Computer_'].str.lower()
-    
-    hml_df['D4_DataType_'] = 'flist-hml'
-    
-    hml_df = hml_df.reset_index(drop=True)
-    return hml_df
-
+# POTENTIALLY NON-PUBLIC FUNCTIONS ############################################
 
 def find_anomalies(indf, model_type="simple_autoencoder", **kwargs):
     if 'D4_DataType_' in indf.columns:
         if indf['D4_DataType_'][0]=='evtx':
-            hml_df = convert_evtx_ham_to_hml(indf)
-        elif indf['D4_DataType_'][0]=='flist':
-            hml_df = convert_flist_ham_to_hml(indf)
-        elif indf['D4_DataType_'][0]=='evtx-hml' or indf['D4_DataType_'][0]=='flist-hml':
-            hml_df = indf
+            hml_df = d4evtx.find_anomalies_evtx(indf)
+        #elif indf['D4_DataType_'][0]=='flist':
+        #    hml_df = convert_flist_ham_to_hml(indf)
+        elif indf['D4_DataType_'][0]=='evtx-hml': #or indf['D4_DataType_'][0]=='flist-hml':
+            d4evtx.find_anomalies_evtx(indf)
         else:
             print("DataFrame type not supported")
             return None, None
     else:
         print("DataFrame type not supported")
         return None, None
+    
     hml_df = hml_df.drop(columns=['D4_DataType_',])
 
     if model_type == "simple_autoencoder":
@@ -138,7 +88,28 @@ def find_anomalies(indf, model_type="simple_autoencoder", **kwargs):
         topanomdf, anomdf, lossdf, lossftdf = ml_model_execution_quick_case(traindf=hml_df, preddf=hml_df, model_type=model_type, **kwargs)
         return anomdf, lossdf
 
-def ml_model_execution_quick_case(**kwargs):    
+def ml_model_execution_quick_case(**kwargs):
+
+    # traindf                = kwargs.get('traindf',                None)
+    # trainarr               = kwargs.get('trainarr',               None)
+    # preddf                 = kwargs.get('preddf',                 None)
+    # model_type             = kwargs.get('model_type',             None)
+    # lstm_units             = kwargs.get('lstm_units',             None)
+    # lstm_time_steps        = kwargs.get('lstm_time_steps',        None)
+    # activation_function    = kwargs.get('activation_function',    None)
+    # model_filename         = kwargs.get('model_filename',         None)
+    # loops                  = kwargs.get('loops',                  1)
+    # epochss                = kwargs.get('epochss',                [2])
+    # error_ntop             = kwargs.get('error_ntop',             5000)
+    # verbose                = kwargs.get('verbose',                0)
+    # cols2drop              = kwargs.get('cols2drop',              [])
+    # transform_method       = kwargs.get('transform:_method',      "label_encoder")
+    # batch_size             = kwargs.get('batch_size',             8)
+    # ntop_anom              = kwargs.get('ntop_anom',              500)
+    # autosave_miloss_model  = kwargs.get('autosave_minloss_model', True)
+    # maxcnt                 = kwargs.get('maxcnt',                 1)
+    # activation_function    = kwargs.get('activation_function',    "tanh")
+    
     return model_execution(**kwargs)
 
 def model_execution(**kwargs):
@@ -152,7 +123,14 @@ def model_execution(**kwargs):
     epochss                = kwargs.get('epochss',                [10])
     ntop_anom              = kwargs.get('ntop_anom',               200)
     maxcnt                 = kwargs.get('maxcnt',                 1)
+    # unused parameters
+    # model_filename_root    = kwargs.get('model_filename_root',    None)
+    # model_filename         = kwargs.get('model_filename',         None)
     evilqueryfield         = kwargs.get('evilqueryfield',         None)
+    # loops                  = kwargs.get('loops',                  1)
+    # batch_size             = kwargs.get('batch_size',             8)
+    # error_ntop             = kwargs.get('error_ntop',             None)
+    # autosave_minloss_model = kwargs.get('autosave_minloss_model', False)
 
     # Model-specific Arguments
     lstm_time_steps        = kwargs.get('lstm_time_steps',        200)
@@ -213,6 +191,10 @@ def model_execution(**kwargs):
                 print(anomdf.dtypes)
                 print("DEBUG: ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^")
                 print("")
+
+
+            #erroranomidx = list(pd.Series(pd.DataFrame(loss.sort_values(ascending=False)).reset_index()['index']).values)
+            #anomsorteddf = predindf.loc[erroranomidx].reset_index().rename(columns={"index": "Orig_Index"})
 
             # Find & Print our evil entries
             if (evilqueryfield is not None) and (evilquerystring is not None):
@@ -341,7 +323,9 @@ def ml_autoencoder(**kwargs):
     def create_lstm_dataset_predict(X, time_steps=1):
         Xs = []
         for i in range(len(X) - time_steps + 1):
+        #for i in range(0, len(X), time_steps):
             v = X.iloc[i:(i + time_steps)].values
+            #print("XXXX: "+str(i)+" - "+str(v))
             Xs.append(v)        
         return np.array(Xs)
 
@@ -405,21 +389,30 @@ def ml_autoencoder(**kwargs):
                 scaler   = scaler.fit(predinarr)
                 predinarr = scaler.transform(predinarr)
 
+                # Summarize the scale of each input variable
+                #for i in range(predinarr.shape[1]):
+                #    print('>%d, predinarr: min=%.3f, max=%.3f' % (i, predinarr[:, i].min(), predinarr[:, i].max()))
+
             elif data_scaling_method == "standardize":
                 print("- Scaling Data -> Standardize")
                 print("  + WARNING: standardization is not implemented yet. Skipping.")
 
             if verbose >= 1:
                 print("\n[PRED] After Scaling -> "+data_scaling_method)
+                #display(pd.DataFrame(predinarr, columns=predindf.columns).head(4))
                 display(pd.DataFrame(predinarr, columns=predindf.columns).head(4))
 
         # LSTM  - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
         if model_type == "lstm_autoencoder":
             print("- [PRED] Creating 3D pred numpy array from predinarr (this can take a long time)...")
+            #print("XXXX-A:")
+            #print(predinarr)
             predinarr2d = predinarr
             predinarr3d = create_lstm_dataset_predict(pd.DataFrame(predinarr2d), lstm_time_steps)
             predinarr   = predinarr3d
             print("  + "+str(predinarr2d.shape)+" -> "+str(predinarr3d.shape))
+            #print("XXXX-B:")
+            #print(predinarr)
 
         return predinarr, transform_dict, scaler
 
@@ -495,6 +488,9 @@ def ml_autoencoder(**kwargs):
     # Input Data - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
     trainorigdf            = kwargs.get('traindf',                None)
     predinorigdf           = kwargs.get('preddf',                 None)
+    # Input Data Filtering - - - - - - - - - - - - - - - - - - - - - - - - - - -
+    # argtsmin               = kwargs.get('argtsmin',               None)
+    # argtsmax               = kwargs.get('argtsmax',               None)
     # Data Preparation - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
     transform_method       = kwargs.get('transform_method',       "label_encoder")
     data_scaling_method    = kwargs.get('data_scaling_method',    "normalize")     # { none | normalize | (standardize) }
@@ -517,7 +513,7 @@ def ml_autoencoder(**kwargs):
     # Predictions - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
     error_threshold        = kwargs.get('error_threshold',          None)
     error_ntop             = kwargs.get('error_ntop',               None)
-    
+
     # BODY ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
     # HEALTH CHECKS -----------------------------------------------------------
@@ -598,6 +594,7 @@ def ml_autoencoder(**kwargs):
 
     # PREDICTION  - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
     predinarr, transform_dict, scaler = prediction_data_preparation(predindf, transform_method, data_scaling_method, verbose)
+    #print("XXXX: "+str(predinarr.shape))
 
 
     # CREATING THE NEURAL NETWORK ARCHITECTURE --------------------------------
@@ -714,6 +711,27 @@ def ml_autoencoder(**kwargs):
                 autoencoder.add(LSTM(lstm_units, return_sequences=True))
                 autoencoder.add(TimeDistributed(Dense(nfeatures)))
 
+                # MULTILAYER - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+                #  autoencoder = keras.Sequential()
+                #  # Encoder
+                #  autoencoder.add(LSTM(32, activation='relu', input_shape=(timesteps, input_dim), return_sequences=True))
+                #  autoencoder.add(LSTM(16, activation='relu', return_sequences=False))
+                #  autoencoder.add(RepeatVector(timesteps))
+                #  # Decoder
+                #  autoencoder.add(LSTM(16, activation='relu', return_sequences=True))
+                #  autoencoder.add(LSTM(32, activation='relu', return_sequences=True))
+                #  autoencoder.add(TimeDistributed(Dense(input_dim)))
+
+                # With Dropout Layers  - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+                #  model = keras.Sequential()
+                #  model.add(keras.layers.LSTM( units=64, input_shape=(X_train.shape[1], X_train.shape[2])))
+                #  model.add(keras.layers.Dropout(rate=0.2))
+                #  model.add(keras.layers.RepeatVector(n=X_train.shape[1]))
+                #  model.add(keras.layers.LSTM(units=64, return_sequences=True))
+                #  model.add(keras.layers.Dropout(rate=0.2))
+                #  model.add(keras.layers.TimeDistributed(keras.layers.Dense(units=X_train.shape[2])))
+                #  model.compile(loss='mae', optimizer='adam')
+
                 optimizer_deflt = 'adam'
                 loss_deflt      = 'mae'
            
@@ -777,7 +795,7 @@ def ml_autoencoder(**kwargs):
         print("- Min. Loss:       "+str(minloss))
         print("- Min. Loss Model: "+str(minlossmdlname))
         print("")
-    
+
         # Save model, if model file does not exist
         if autosave_minloss_model:
             if autosave_minloss_model:
@@ -877,6 +895,12 @@ def ml_autoencoder(**kwargs):
 
     print("- Error Threshold: "+str(error_threshold)+autocalcmsg)
 
+
+    # Select entries above the error threshold
+    # Instead of using predoutdf we will use predinfindf, which has been adapted
+    # to be the same dimension as predoutdf and is good enough to identify the
+    # anomalous entries as predoutdf, since they both have corresponding entries
+    # (original vs predicted) in a 1-to-1 way
     if   model_type == "simple_autoencoder":
         anomdf = predinorigdf[loss >= error_threshold]
     elif model_type == "multilayer_autoencoder":
@@ -907,3 +931,4 @@ def ml_autoencoder(**kwargs):
             return anomdf, losssr, loss_ft
     else:
         return anomdf, losssr
+
